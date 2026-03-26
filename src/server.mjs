@@ -1,3 +1,7 @@
+/**
+ * Defaults below are for **local** Crux (127.0.0.1 ports). Production/staging sets
+ * ISSUER_BASE_URL, VERIFIER_BASE_URL, BOARD_* via env (see README “Public staging”).
+ */
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";

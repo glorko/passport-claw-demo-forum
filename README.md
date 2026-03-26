@@ -16,6 +16,18 @@ Layered rules classify **agent** vs **human** before passport (see `architecture
 - **API:** `../passport-claw-dev/.env.example` — `VERIFIER_*`, `PORT`, `BOARD_FRONTEND_ORIGIN`, `PASSPORT_DOCS_URL`, optional `AGENT_HINT_MAX_AGE`.
 - **Vite:** copy `.env.example` → `.env` — `VITE_API_BASE=http://127.0.0.1:19080`.
 
+## Public staging (Railway)
+
+Hosted demo (HTTPS, API + built UI on one service):
+
+| | URL |
+|--|-----|
+| Board | `https://demo-forum-staging.up.railway.app` |
+| Issuer | `https://issuer-staging.up.railway.app` |
+| Verifier | `https://verifier-staging-e555.up.railway.app` |
+
+OpenClaw operators should set **`ISSUER_BASE_URL`** to the staging issuer before **`/passport enroll`**. See **`passport-claw-openclaw-plugin`** README (`STAGING_PASSPORT_STACK`).
+
 ## Run (without Crux)
 
 ```bash
@@ -26,7 +38,7 @@ npm run dev:web        # terminal 2
 
 ## Production (same process: API + built static UI)
 
-Build puts assets under `web/dist`. The API serves them when present:
+Build puts assets under `web/dist` (including **`/passport-local.html`** — multi-page Vite entry). The API serves them when present:
 
 ```bash
 npm run build

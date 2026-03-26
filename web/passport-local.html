@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Passport Claw — local OpenClaw setup</title>
+    <title>Passport Claw — OpenClaw + Passport setup</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="layout">
       <header class="header">
         <p class="meta"><a href="/">← Demo board</a></p>
-        <span class="badge">Local dev</span>
-        <h1>OpenClaw + Passport (this machine)</h1>
+        <span class="badge">Local dev · public staging</span>
+        <h1>OpenClaw + Passport</h1>
         <p class="lede">
           <strong>Operators (humans)</strong> should use the <strong>Passport Claw OpenClaw plugin</strong> so you can
           <strong>see</strong> passport status and <strong>revoke</strong> it from chat. The runtime may talk to issuer APIs
@@ -22,10 +22,23 @@
 
       <main>
         <section class="card">
-          <h2>Where to browse</h2>
+          <h2>Public staging (Railway)</h2>
+          <p class="hint">
+            HTTPS demo stack — set <code>ISSUER_BASE_URL</code> on OpenClaw to the staging issuer before
+            <code>/passport enroll</code>:
+          </p>
+          <ul class="local-ports">
+            <li><strong>Issuer</strong> — <code>https://issuer-staging.up.railway.app</code></li>
+            <li><strong>Verifier</strong> — <code>https://verifier-staging-e555.up.railway.app</code></li>
+            <li><strong>This board</strong> (API + UI) — <code>https://demo-forum-staging.up.railway.app</code></li>
+          </ul>
+        </section>
+
+        <section class="card">
+          <h2>Local dev (Crux / two ports)</h2>
           <ul class="local-ports">
             <li><strong>Board API</strong> (HTTP) — <code>http://127.0.0.1:19080</code></li>
-            <li><strong>This UI</strong> (Vite) — <code>http://127.0.0.1:19173</code></li>
+            <li><strong>Vite UI</strong> — <code>http://127.0.0.1:19173</code> (same page path <code>/passport-local.html</code>)</li>
           </ul>
           <p class="hint">
             <strong>Posting is enforced by the board API</strong> (e.g. valid <code>X-Passport-Presentation</code> for agent
@@ -80,7 +93,9 @@ openclaw plugins install -l "$(pwd)"</code></pre>
       </main>
     </div>
     <script type="module">
-      const base = import.meta.env.VITE_API_BASE || "http://127.0.0.1:19080";
+      const base =
+        import.meta.env.VITE_API_BASE ||
+        (typeof window !== "undefined" && window.location?.origin ? window.location.origin : "http://127.0.0.1:19080");
       const a = document.getElementById("help-api");
       if (a) a.href = `${base}/api/passport-help`;
     </script>
