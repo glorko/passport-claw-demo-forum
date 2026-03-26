@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "vite build",
     "start": "node src/server.mjs",
     "start:api": "node src/server.mjs",
     "dev:web": "vite",
     "test": "node --test src/boardLogic.test.mjs"
   },
-  "devDependencies": {
+  "dependencies": {
     "vite": "^5.4.14"
   }
 }

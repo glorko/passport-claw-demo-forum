@@ -1,4 +1,7 @@
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   isAgentRequest,
   humanPostBody,
@@ -6,6 +9,10 @@ import {
   COOKIE_RC,
   listPostsQuery,
 } from "./boardLogic.mjs";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** Vite output when `npm run build` has run (e.g. Railway). */
+const WEB_DIST = path.join(__dirname, "..", "web", "dist");
 
 const posts = [];
 let seq = 1;
@@ -177,6 +184,42 @@ function clearCookie(res, name) {
   }
 }
 
+function mimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const map = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".mjs": "application/javascript; charset=utf-8",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".woff2": "font/woff2",
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+/** Serve built Vite assets from `web/dist` (path traversal–safe). */
+function tryServeWebDist(res, pathname) {
+  if (!fs.existsSync(WEB_DIST)) return false;
+  const rel = pathname === "/" || pathname === "" ? "index.html" : pathname.replace(/^\/+/, "");
+  const candidate = path.join(WEB_DIST, rel);
+  const resolved = path.resolve(candidate);
+  const rootResolved = path.resolve(WEB_DIST);
+  if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
+    return false;
+  }
+  if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+    const buf = fs.readFileSync(resolved);
+    res.writeHead(200, { "Content-Type": mimeType(resolved), "Content-Length": buf.length });
+    res.end(buf);
+    return true;
+  }
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url || "/", `http://${req.headers.host}`);
 
@@ -309,6 +352,10 @@ const server = http.createServer(async (req, res) => {
     };
     posts.push(post);
     return json(res, 201, post);
+  }
+
+  if (req.method === "GET" && tryServeWebDist(res, u.pathname)) {
+    return;
   }
 
   res.writeHead(404);

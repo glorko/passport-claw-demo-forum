@@ -1,4 +1,9 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:19080";
+function defaultApiBase() {
+  if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE;
+  if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
+  return "http://127.0.0.1:19080";
+}
+const API_BASE = defaultApiBase();
 
 const PAGE_SIZE = 10;
 

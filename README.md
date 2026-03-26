@@ -24,6 +24,17 @@ npm run start:api      # terminal 1
 npm run dev:web        # terminal 2
 ```
 
+## Production (same process: API + built static UI)
+
+Build puts assets under `web/dist`. The API serves them when present:
+
+```bash
+npm run build
+npm start
+```
+
+On Railway (or similar), set a **build** command to `npm run build` and **start** to `npm start`. `VITE_API_BASE` is optional: the UI defaults to `window.location.origin` when unset so same-origin deploys work.
+
 ## Test
 
 ```bash
