@@ -5,6 +5,11 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.mjs",
+    "start:api": "node src/server.mjs",
+    "dev:web": "vite",
     "test": "node --test src/boardLogic.test.mjs"
+  },
+  "devDependencies": {
+    "vite": "^5.4.14"
   }
 }

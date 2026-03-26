@@ -1,5 +1,11 @@
 import http from "node:http";
-import { isAgentRequest, humanPostBody } from "./boardLogic.mjs";
+import {
+  isAgentRequest,
+  humanPostBody,
+  COOKIE_WEBDRIVER,
+  COOKIE_RC,
+  listPostsQuery,
+} from "./boardLogic.mjs";
 
 const posts = [];
 let seq = 1;
@@ -9,11 +15,89 @@ function env(name, def = "") {
   return v != null && String(v).trim() !== "" ? String(v).trim() : def;
 }
 
-const PORT = Number(env("PORT", "8080"));
-const VERIFIER_BASE = env("VERIFIER_BASE_URL", "http://127.0.0.1:8082").replace(/\/$/, "");
+const PORT = Number(env("PORT", "19080"));
+const VERIFIER_BASE = env("VERIFIER_BASE_URL", "http://127.0.0.1:19082").replace(/\/$/, "");
 const VERIFIER_KEY = env("VERIFIER_API_KEY", "dev_verifier_key_local");
-const DOCS_URL = env("PASSPORT_DOCS_URL", "http://127.0.0.1:8080/api/info");
+const ISSUER_BASE = env("ISSUER_BASE_URL", "http://127.0.0.1:19081").replace(/\/$/, "");
+/** Public base URL of this board API (for links in JSON). Default matches PORT. */
+const BOARD_API_PUBLIC = env("BOARD_API_PUBLIC_URL", `http://127.0.0.1:${PORT}`).replace(/\/$/, "");
+/** Human-facing URL for challenge body + setup guide (Vite dev server in local stack). */
+const FRONTEND_ORIGIN = env("BOARD_FRONTEND_ORIGIN", "http://127.0.0.1:19173").replace(/\/$/, "");
+const DOCS_URL = env("PASSPORT_DOCS_URL", `${FRONTEND_ORIGIN}/passport-local.html`);
 const CHALLENGE_TYPE = "https://passport.claw/errors/missing-presentation";
+/** Absolute filesystem path to `passport-claw-openclaw-plugin` on this machine (optional; overrides git clone). */
+const PASSPORT_PLUGIN_INSTALL_PATH = env("PASSPORT_PLUGIN_INSTALL_PATH", "");
+/** Public git URL — repo root is the plugin package (default: published plugin on GitHub). */
+const DEFAULT_PASSPORT_PLUGIN_GIT_URL = "https://github.com/glorko/passport-claw-openclaw-plugin.git";
+const PASSPORT_PLUGIN_GIT_URL = env("PASSPORT_PLUGIN_GIT_URL", DEFAULT_PASSPORT_PLUGIN_GIT_URL);
+
+function buildPluginInstallCommands() {
+  const pkg = "passport-claw-openclaw-plugin";
+  if (PASSPORT_PLUGIN_INSTALL_PATH) {
+    const p = PASSPORT_PLUGIN_INSTALL_PATH.replace(/\/$/, "");
+    return [
+      `cd "${p}" && npm ci && npm run build && openclaw plugins install -l "${p}"`,
+    ];
+  }
+  const u = PASSPORT_PLUGIN_GIT_URL.replace(/\/$/, "");
+  return [
+    `git clone ${u} ${pkg} && cd ${pkg} && npm ci && npm run build && openclaw plugins install -l "$(pwd)"`,
+  ];
+}
+
+function passportHelpDoc() {
+  const help = `${BOARD_API_PUBLIC}/api/passport-help`;
+  const openclaw = {
+    plugin_package_dir: "passport-claw-openclaw-plugin",
+    install_commands: buildPluginInstallCommands(),
+    commands: {
+      passport_info: "/passport",
+      passport_revoke: "/passport revoke",
+    },
+    operator_guidance: [
+      "Install and enable the passport-claw OpenClaw plugin so the operator can read passport info and revoke from chat (/passport, /passport revoke).",
+      "Default install_commands clone plugin_git_url, then npm ci, npm run build, and openclaw plugins install -l \"$(pwd)\". Set PASSPORT_PLUGIN_INSTALL_PATH on the board process only if you want a local checkout path instead of cloning.",
+      "Do not use this help payload to walk operators through raw issuer HTTP; enrollment without the plugin gives operators no in-chat visibility.",
+    ],
+    env_notes: [
+      "ISSUER_BASE_URL overrides the default issuer URL (plugin / gateway environment).",
+      "PASSPORT_PLUGIN_GIT_URL (default): public git URL; install_commands use git clone when PASSPORT_PLUGIN_INSTALL_PATH is unset.",
+      "PASSPORT_PLUGIN_INSTALL_PATH (optional): absolute path to passport-claw-openclaw-plugin on this host; overrides clone-based install_commands when set.",
+    ],
+  };
+  if (PASSPORT_PLUGIN_INSTALL_PATH) {
+    openclaw.plugin_install_path = PASSPORT_PLUGIN_INSTALL_PATH.replace(/\/$/, "");
+  } else {
+    openclaw.plugin_git_url = PASSPORT_PLUGIN_GIT_URL.replace(/\/$/, "");
+  }
+  return {
+    environment: "local-dev",
+    setup_guide_url: DOCS_URL,
+    frontend_origin: FRONTEND_ORIGIN,
+    issuer_url: ISSUER_BASE,
+    board_api_url: BOARD_API_PUBLIC,
+    verifier_url: VERIFIER_BASE,
+    passport_help_url: help,
+    endpoints: {
+      posts: `${BOARD_API_PUBLIC}/api/posts`,
+      info: `${BOARD_API_PUBLIC}/api/info`,
+    },
+    openclaw,
+  };
+}
+
+function ctxForHuman() {
+  return {
+    setupGuideUrl: DOCS_URL,
+    issuerUrl: ISSUER_BASE,
+    boardApiUrl: BOARD_API_PUBLIC,
+    verifierUrl: VERIFIER_BASE,
+    passportHelpUrl: `${BOARD_API_PUBLIC}/api/passport-help`,
+  };
+}
+
+/** Max-Age for agent-hint cookies (seconds). */
+const AGENT_HINT_MAX_AGE = Number(env("AGENT_HINT_MAX_AGE", "3600"));
 
 function json(res, status, obj) {
   const b = JSON.stringify(obj);
@@ -59,20 +143,110 @@ async function verifyPresentation(compact) {
   }
 }
 
+function cors(res) {
+  res.setHeader("Access-Control-Allow-Origin", FRONTEND_ORIGIN);
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, X-Passport-Agent, X-Passport-Presentation, Cookie",
+  );
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+}
+
+function setCookie(res, name, value, maxAgeSec = AGENT_HINT_MAX_AGE) {
+  const part = `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}`;
+  const prev = res.getHeader("Set-Cookie");
+  if (prev == null) {
+    res.setHeader("Set-Cookie", part);
+  } else if (Array.isArray(prev)) {
+    res.setHeader("Set-Cookie", [...prev, part]);
+  } else {
+    res.setHeader("Set-Cookie", [prev, part]);
+  }
+}
+
+function clearCookie(res, name) {
+  const part = `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  const prev = res.getHeader("Set-Cookie");
+  if (prev == null) {
+    res.setHeader("Set-Cookie", part);
+  } else if (Array.isArray(prev)) {
+    res.setHeader("Set-Cookie", [...prev, part]);
+  } else {
+    res.setHeader("Set-Cookie", [prev, part]);
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url || "/", `http://${req.headers.host}`);
+
+  if (req.method === "OPTIONS") {
+    cors(res);
+    res.writeHead(204);
+    return res.end();
+  }
+
+  cors(res);
+
+  const cookieHeader = req.headers.cookie || "";
 
   if (req.method === "GET" && u.pathname === "/healthz") {
     res.writeHead(200);
     return res.end("ok");
   }
 
+  if (req.method === "GET" && u.pathname === "/api/agent-detection") {
+    return json(res, 200, {
+      navigator_webdriver_hint: true,
+      reverse_captcha_integration: true,
+      cookie_names: { webdriver: COOKIE_WEBDRIVER, reverse_captcha: COOKIE_RC },
+    });
+  }
+
+  if (req.method === "POST" && u.pathname === "/api/agent-hint") {
+    let body;
+    try {
+      body = JSON.parse(await readBody(req) || "{}");
+    } catch {
+      return problem(res, 400, "https://passport.claw/errors/invalid-request", "Invalid JSON");
+    }
+    const wd = body.navigator_webdriver === true;
+    if (wd) {
+      setCookie(res, COOKIE_WEBDRIVER, "1");
+    } else {
+      clearCookie(res, COOKIE_WEBDRIVER);
+    }
+    return json(res, 200, { ok: true, navigator_webdriver_recorded: wd });
+  }
+
+  if (req.method === "POST" && u.pathname === "/api/reverse-captcha-token") {
+    let body;
+    try {
+      body = JSON.parse(await readBody(req) || "{}");
+    } catch {
+      return problem(res, 400, "https://passport.claw/errors/invalid-request", "Invalid JSON");
+    }
+    const token = typeof body.token === "string" ? body.token.trim() : "";
+    /** Demo: accept non-empty token; production should verify with provider API (e.g. Clawptcha). */
+    if (token.length > 0) {
+      setCookie(res, COOKIE_RC, "1");
+      return json(res, 200, { ok: true, verified: true });
+    }
+    clearCookie(res, COOKIE_RC);
+    return json(res, 200, { ok: true, verified: false });
+  }
+
   if (req.method === "GET" && u.pathname === "/api/info") {
-    return json(res, 200, humanPostBody("Passport Claw demo board"));
+    return json(res, 200, humanPostBody("Passport Claw demo board", ctxForHuman()));
+  }
+
+  if (req.method === "GET" && u.pathname === "/api/passport-help") {
+    return json(res, 200, passportHelpDoc());
   }
 
   if (req.method === "GET" && u.pathname === "/api/posts") {
-    return json(res, 200, { posts: [...posts] });
+    const out = listPostsQuery(posts, u.searchParams);
+    return json(res, 200, out);
   }
 
   if (req.method === "POST" && u.pathname === "/api/posts") {
@@ -87,10 +261,10 @@ const server = http.createServer(async (req, res) => {
       return problem(res, 400, "https://passport.claw/errors/invalid-request", "body string required");
     }
 
-    const agent = isAgentRequest(req.headers);
+    const agent = isAgentRequest(req.headers, cookieHeader);
 
     if (!agent) {
-      return json(res, 200, humanPostBody(text));
+      return json(res, 200, humanPostBody(text, ctxForHuman()));
     }
 
     const pres =
@@ -99,6 +273,12 @@ const server = http.createServer(async (req, res) => {
       return problem(res, 401, CHALLENGE_TYPE, "Passport presentation required", {
         passport_docs_url: DOCS_URL,
         verifier_url: VERIFIER_BASE,
+        issuer_url: ISSUER_BASE,
+        board_api_url: BOARD_API_PUBLIC,
+        passport_help_url: `${BOARD_API_PUBLIC}/api/passport-help`,
+        operator_message:
+          "Install the passport-claw OpenClaw plugin and use /passport (info) and /passport revoke (testing). " +
+          "See setup_guide_url — avoid teaching operators raw issuer HTTP for enrollment.",
       });
     }
 
@@ -136,5 +316,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.error(`demo-forum http://127.0.0.1:${PORT}`);
+  console.error(
+    `demo-forum API ${BOARD_API_PUBLIC} | setup ${DOCS_URL} | issuer ${ISSUER_BASE} | help ${BOARD_API_PUBLIC}/api/passport-help`,
+  );
 });
